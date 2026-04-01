@@ -478,9 +478,8 @@ export default function MatrixGame() {
     camera.position.set(10, 1.7, 3);
     game.camera = camera;
     var renderer = new THREE.WebGLRenderer({ antialias: false });
-    // Match Claude artifact Three.js r128 color behavior
     if (THREE.ColorManagement) THREE.ColorManagement.enabled = false;
-    renderer.outputColorSpace = THREE.LinearSRGBColorSpace || THREE.LinearEncoding;
+    if (renderer.outputColorSpace !== undefined) renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     renderer.setSize(W, H);
     renderer.setPixelRatio(game.isMobile ? 1 : Math.min(window.devicePixelRatio, 1));
     container.appendChild(renderer.domElement);
@@ -2227,7 +2226,7 @@ export default function MatrixGame() {
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerUp}
-      style={{ width: "100vw", height: "100vh", background: "#000", position: "relative", overflow: "hidden", touchAction: "none", cursor: entered && !gs.won && !gs.caught ? "none" : "default" }}
+      style={{ width: "100vw", height: "100dvh", background: "#000", position: "fixed", top: 0, left: 0, overflow: "hidden", touchAction: "none", cursor: entered && !gs.won && !gs.caught ? "none" : "default" }}
     >
       <div ref={mountRef} style={{ width: "100%", height: "100%" }} />
 
