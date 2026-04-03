@@ -100,12 +100,18 @@ var TRINITY_HALL_ZC = (TRINITY_HALL_Z0 + TRINITY_Z1) * 0.5;
 var TRINITY_ENTRY_Z = 42.08;
 var TRINITY_DOORWAY_X0 = 5.05;
 var TRINITY_DOORWAY_X1 = 8.95;
-var TRINITY_RUN_WPS = [
-  { x: 7, z: 53.6 },
-  { x: 3.95, z: 54.4 },
-  { x: 3.9, z: 59.8 },
-  { x: 7, z: TRINITY_Z1 - 0.55 },
-];
+/** Straight run to north exit after dialogue (center of doorway). */
+var TRINITY_EXIT_DOOR_X = 7;
+var TRINITY_EXIT_DOOR_Z = TRINITY_Z1 - 0.55;
+
+/** Betrayal path: freeze further south so the exit door reads behind Morpheus (portal ~ Z1−0.24). */
+var TRINITY_BETRAYAL_MORPHEUS_Z_FAR = TRINITY_Z1 - 4.48;
+var TRINITY_BETRAYAL_MORPHEUS_Z_NEAR = TRINITY_Z1 - 2.88;
+/** In the room, south of the portal — reads “in front of” the exit glow from the corridor. */
+var MORPHEUS_BETRAYAL_SPAWN_Z = TRINITY_Z1 - 0.5;
+/** Stay mostly between player and door; slight north drift allowed while walking. */
+var MORPHEUS_BETRAYAL_WALK_MAX_Z = TRINITY_Z1 - 0.32;
+var MORPHEUS_BETRAYAL_STOP_DIST = 1.95;
 
 /** Smith spawns at north (exit) doorway, walks south into the room, then monologue. */
 var SMITH_EXIT_ENTER_Z = TRINITY_Z1 - 0.72;
@@ -673,6 +679,7 @@ export default function MatrixGame() {
     trinityJailFallParts: null,
     trinityFallTimer: 0,
     trinityRoot: null,
+    trinityBodyRoot: null,
     trinityPhase: -1,
     trinityPhaseTimer: 0,
     trinityBubble: null,
@@ -706,6 +713,9 @@ export default function MatrixGame() {
     punchVisualGroup: null,
     punchArmBaseZ: -0.14,
     trinityDesecrated: false,
+    trinityBetrayalAnim: null,
+    trinityBetrayalMats: null,
+    trinityBetrayalBase: null,
     secretMorpheusPhase: 0,
     secretMorphLineTimer: 0,
     playerFrozen: false,
@@ -828,6 +838,7 @@ export default function MatrixGame() {
     game.trinityPhase = -1;
     game.trinityPhaseTimer = 0;
     game.trinityRunWi = 0;
+    game.trinityBodyRoot = null;
     game.introPhase = 0;
     game.introTimer = 0;
     game.introDone = false;
@@ -858,6 +869,9 @@ export default function MatrixGame() {
     game.smithHitReactTimer = 0;
     game.smithWalkSpeed = 2.4;
     game.trinityDesecrated = false;
+    game.trinityBetrayalAnim = null;
+    game.trinityBetrayalMats = null;
+    game.trinityBetrayalBase = null;
     game.secretMorpheusPhase = 0;
     game.secretMorphLineTimer = 0;
     game.playerFrozen = false;
@@ -867,7 +881,7 @@ export default function MatrixGame() {
     var camera = new THREE.PerspectiveCamera(75, W / H, 0.1, 100);
     var playerSpawnX = 10;
     var playerSpawnZ = 3;
-    var morpheusAheadZ = 2.9;
+    var morpheusAheadZ = 2.38;
     var morpheusFocusY = 1.73;
     camera.position.set(playerSpawnX, 1.7, playerSpawnZ);
     game.yaw = Math.PI;
@@ -1030,7 +1044,8 @@ export default function MatrixGame() {
       // Wider than walk collision + segment tests so shots cannot tunnel through pillars.
       game.bulletBlocks.push({ x: px2, z: pz2, hw: 0.64, hd: 0.64 });
     }
-    var pxs = [TRINITY_X0 + 3.5, (TRINITY_X0 + TRINITY_X1) / 2, TRINITY_X1 - 3.5];
+    // Left + right columns only — no center line (x = 7) blocking hall → exit path
+    var pxs = [TRINITY_X0 + 3.5, TRINITY_X1 - 3.5];
     var pzs = [TRINITY_Z0 + 6.5, (TRINITY_Z0 + TRINITY_Z1) / 2, TRINITY_Z1 - 6.5];
     for (var pxi = 0; pxi < pxs.length; pxi++) {
       for (var pzi = 0; pzi < pzs.length; pzi++) {
@@ -1108,6 +1123,8 @@ export default function MatrixGame() {
 
     var trinityRoot = new THREE.Group();
     trinityRoot.position.set(7, 0, 54);
+    // Face the hallway entrance (south / −world Z) while caged
+    trinityRoot.rotation.y = Math.PI;
     var jailMat = new THREE.MeshBasicMaterial({ color: 0x353535, transparent: true, opacity: 0.93 });
     var trinityJail = new THREE.Group();
     var trinityJailFallParts = [];
@@ -1227,6 +1244,7 @@ export default function MatrixGame() {
     var tLegR = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.75, 6), tBoot);
     tLegR.position.set(0.1, 0.38, 0); trinBody.add(tLegR);
     trinityRoot.add(trinBody);
+    game.trinityBodyRoot = trinBody;
     var triBubble = makeSpeechBubble();
     triBubble.sprite.position.set(0, 2.55, 0);
     triBubble.sprite.scale.set(3.2, 1.1, 1);
@@ -1919,7 +1937,44 @@ export default function MatrixGame() {
     morpheusRoot.add(morBubble.sprite);
     game.morpheusBubble = morBubble;
     game.morpheusRoot = morpheusRoot;
+    morpheusRoot.renderOrder = 22;
     scene.add(morpheusRoot);
+
+    function reinstateMorpheusForBetrayalAmbush() {
+      var mr = game.morpheusRoot;
+      if (!mr) return;
+      mr.visible = true;
+      mr.renderOrder = 22;
+      mr.traverse(function (obj) {
+        if (obj.isMesh && obj.material && obj.material.isMaterial) {
+          var m = obj.material;
+          if (game.morpheusGunProp && obj === game.morpheusGunProp) {
+            m.transparent = true;
+            m.opacity = 0.98;
+            m.depthWrite = true;
+            m.depthTest = true;
+          } else {
+            m.opacity = 1;
+            m.transparent = false;
+            m.depthWrite = true;
+            m.depthTest = true;
+            m.alphaTest = 0;
+            if (m.blending !== undefined) m.blending = THREE.NormalBlending;
+            if (m.premultipliedAlpha !== undefined) m.premultipliedAlpha = false;
+          }
+          obj.renderOrder = 22;
+          m.needsUpdate = true;
+        }
+        if (obj.isSprite && obj.material) {
+          obj.renderOrder = 32;
+          obj.material.opacity = 1;
+          obj.material.depthTest = false;
+          obj.material.depthWrite = false;
+          obj.material.needsUpdate = true;
+        }
+      });
+    }
+    game.reinstateMorpheusForBetrayalAmbush = reinstateMorpheusForBetrayalAmbush;
 
     // Phone booth in Hub corner
     var boothGroup = new THREE.Group();
@@ -2477,7 +2532,8 @@ export default function MatrixGame() {
           if (game.kbd.KeyD || game.kbd.ArrowRight) str = 1;
         }
         if (!game.introDone && game.introPhase === 0) { fwd = 0; str = 0; }
-        var trinitySeqMoveLock = game.trinityAgentsCleared && game.trinityRoot && game.trinityPhase >= 0 && game.trinityPhase < 4;
+        var trinitySeqMoveLock = game.trinityAgentsCleared && game.trinityRoot && game.trinityPhase >= 0 && game.trinityPhase < 4
+          && !game.trinityBetrayalAnim;
         var smithExitStepLock = game.smithPhase === 0;
         if (trinitySeqMoveLock || smithExitStepLock || game.playerFrozen) { fwd = 0; str = 0; }
         var il = Math.sqrt(str * str + fwd * fwd);
@@ -2718,8 +2774,24 @@ export default function MatrixGame() {
           var triClose = minDistXZSegmentToPoint(ox, oz, pbx2, pbz2, trx, trz);
           if (triClose < 1.58 && pby2 > 0.12 && pby2 < 2.7) {
             game.trinityDesecrated = true;
-            spawnHitParticles(trx, 1.35, trz, 0xff3366, 22);
-            showRoom("THE MATRIX REMEMBERS THAT");
+            game.trinityBetrayalBase = {
+              rx: trHit.rotation.x,
+              ry: trHit.rotation.y,
+              rz: trHit.rotation.z,
+              y: trHit.position.y,
+              x: trHit.position.x,
+              z: trHit.position.z
+            };
+            game.trinityBetrayalAnim = { t: 0, lastPartT: 0 };
+            game.trinityBetrayalMats = null;
+            spawnHitParticles(trx, 1.35, trz, 0xff3366, 42);
+            spawnHitParticles(trx + 0.2, 1.55, trz + 0.08, 0xff1144, 24);
+            spawnHitParticles(trx - 0.15, 1.15, trz - 0.12, 0xff88cc, 18);
+            if (game.trinityBubble) {
+              updateBubbleText(game.trinityBubble, "You shot ME?!\nI had a whole\nsequel arc drafted!\nThe paperwork alone—");
+              game.trinityBubble.sprite.visible = true;
+              if (game.trinityBubble.sprite.material) game.trinityBubble.sprite.material.opacity = 1;
+            }
             pbHit = true;
           }
         }
@@ -2847,14 +2919,85 @@ export default function MatrixGame() {
           game.trinityPhaseTimer = 0;
           if (game.trinityRoot) {
             game.trinityRoot.position.set(7, 0, 54);
-            game.trinityRoot.rotation.y = 0;
+            game.trinityRoot.rotation.y = Math.atan2(px - 7, pz - 54);
             game.trinityRoot.visible = true;
           }
           updateGame({ trinityLiberated: true });
           showRoom("TRINITY FREE");
         }
       }
-      if (game.trinityAgentsCleared && game.trinityRoot && game.trinityPhase >= 0 && game.trinityPhase < 4) {
+      if (game.trinityBetrayalAnim != null && game.trinityRoot) {
+        var trB = game.trinityRoot;
+        var tbBase = game.trinityBetrayalBase;
+        game.trinityBetrayalAnim.t += dt;
+        var tbt = game.trinityBetrayalAnim.t;
+        if (!game.trinityBetrayalMats) {
+          game.trinityBetrayalMats = [];
+          var triFadeRoot = game.trinityBodyRoot || trB;
+          triFadeRoot.traverse(function (obj) {
+            if (obj.isMesh && obj.material) {
+              var mm = obj.material;
+              if (mm.userData.trinityFadeBase == null) mm.userData.trinityFadeBase = mm.opacity != null ? mm.opacity : 1;
+              mm.transparent = true;
+              game.trinityBetrayalMats.push(mm);
+            }
+          });
+        }
+        var fallU2 = Math.min(1, tbt / 3.75);
+        if (tbBase) {
+          trB.rotation.y = tbBase.ry;
+          trB.rotation.z = tbBase.rz;
+          trB.rotation.x = tbBase.rx + fallU2 * (Math.PI / 2 * 0.9);
+          trB.position.x = tbBase.x;
+          trB.position.z = tbBase.z;
+          trB.position.y = tbBase.y - 0.78 * fallU2;
+          var triBet = game.trinityBetrayalAnim;
+          if (triBet && tbt < 7.55 && tbt - (triBet.lastPartT || 0) >= 0.48) {
+            triBet.lastPartT = tbt;
+            var tcx = tbBase.x + (Math.random() - 0.5) * 0.55;
+            var tcz = tbBase.z + (Math.random() - 0.5) * 0.55;
+            var tcy = 0.85 + Math.random() * 0.95;
+            spawnHitParticles(tcx, tcy, tcz, Math.random() > 0.45 ? 0xff4488 : 0xff2233, 8 + Math.floor(Math.random() * 9));
+          }
+        }
+        if (tbt > 2.78) {
+          var fadeU2 = Math.min(1, (tbt - 2.78) / 3.95);
+          for (var tmi = 0; tmi < game.trinityBetrayalMats.length; tmi++) {
+            var mtm = game.trinityBetrayalMats[tmi];
+            mtm.opacity = mtm.userData.trinityFadeBase * (1 - fadeU2);
+          }
+          if (game.trinityBubble && game.trinityBubble.sprite.material) {
+            game.trinityBubble.sprite.material.opacity = Math.max(0, 1 - fadeU2);
+          }
+        }
+        if (tbt >= 7.55) {
+          trB.visible = false;
+          if (game.trinityBubble) {
+            game.trinityBubble.sprite.visible = false;
+            if (game.trinityBubble.sprite.material) game.trinityBubble.sprite.material.opacity = 1;
+          }
+          game.trinityBetrayalAnim = null;
+          game.trinityBetrayalMats = null;
+          game.trinityBetrayalBase = null;
+          game.trinityPhase = 4;
+          if (game.trinityJailGroup) game.trinityJailGroup.visible = false;
+          game.smithPhase = -1;
+          if (game.agentSmith) {
+            game.agentSmith.group.visible = false;
+            game.agentSmith.applyFadeMultiplier(1);
+          }
+          game.trinityRoomSealed = false;
+          game.finalDoorOpen = true;
+          if (game.finalExitGlow) game.finalExitGlow.material.opacity = 0.55;
+          if (game.finalExitSign) game.finalExitSign.visible = true;
+          if (game.finalExitCore) game.finalExitCore.visible = true;
+          if (game.finalExitLight) game.finalExitLight.intensity = 1.15;
+          if (game.finalExitFrameMeshes) {
+            for (var femb = 0; femb < game.finalExitFrameMeshes.length; femb++) game.finalExitFrameMeshes[femb].visible = true;
+          }
+          showRoom("EXIT OPEN — NO SMITH");
+        }
+      } else if (game.trinityAgentsCleared && game.trinityRoot && game.trinityPhase >= 0 && game.trinityPhase < 4) {
         var tr = game.trinityRoot;
         var tgx = px - tr.position.x;
         var tgz = pz - tr.position.z;
@@ -2884,14 +3027,16 @@ export default function MatrixGame() {
           if (game.trinityPhaseTimer >= 2.5) {
             game.trinityPhase = 3;
             game.trinityPhaseTimer = 0;
-            game.trinityRunWi = 0;
             if (game.trinityBubble) game.trinityBubble.sprite.visible = false;
           }
         } else if (game.trinityPhase === 3) {
-          var twps = TRINITY_RUN_WPS;
-          var twi = game.trinityRunWi;
-          if (twi >= twps.length) {
+          var twdx = TRINITY_EXIT_DOOR_X - tr.position.x;
+          var twdz = TRINITY_EXIT_DOOR_Z - tr.position.z;
+          var twdist = Math.hypot(twdx, twdz);
+          if (twdist < 0.42) {
             game.trinityPhase = 4;
+            tr.position.x = TRINITY_EXIT_DOOR_X;
+            tr.position.z = TRINITY_EXIT_DOOR_Z;
             tr.visible = false;
             tr.position.y = 0;
             if (game.trinityJailGroup) game.trinityJailGroup.visible = false;
@@ -2911,22 +3056,12 @@ export default function MatrixGame() {
             game.smithSpeechTimer = 0;
             showRoom("AGENT SMITH — INBOUND");
           } else {
-            var twp = twps[twi];
-            var twdx = twp.x - tr.position.x;
-            var twdz = twp.z - tr.position.z;
-            var twdist = Math.hypot(twdx, twdz);
-            var triRunSpd = 4.0 * dt;
-            if (twdist < 0.4) {
-              tr.position.x = twp.x;
-              tr.position.z = twp.z;
-              game.trinityRunWi = twi + 1;
-            } else {
-              var triStep = Math.min(triRunSpd, twdist);
-              tr.position.x += (twdx / twdist) * triStep;
-              tr.position.z += (twdz / twdist) * triStep;
-              tr.rotation.y = Math.atan2(twdx, twdz);
-              tr.position.y = Math.sin(animT * 14) * 0.08;
-            }
+            var triRunSpd = 2.05 * dt;
+            var triStep = Math.min(triRunSpd, twdist);
+            tr.position.x += (twdx / twdist) * triStep;
+            tr.position.z += (twdz / twdist) * triStep;
+            tr.rotation.y = Math.atan2(twdx, twdz);
+            tr.position.y = Math.sin(animT * 7.5) * 0.08;
           }
         }
       }
@@ -3133,15 +3268,17 @@ export default function MatrixGame() {
         }
       }
 
-      // Secret 3/3 — approach exit after desecrating Trinity's position → Morpheus ambush
+      // Secret 3/3 — betrayal path: mid-corridor before win plane → Morpheus ambush (freeze + speech + MG)
       if (game.trinityDesecrated && game.finalDoorOpen && game.trinityAgentsCleared && !game.won && !game.caught
-          && game.secretMorpheusPhase === 0 && pz > TRINITY_Z1 - 0.72 && px >= 5.1 && px <= 8.9) {
+          && game.secretMorpheusPhase === 0
+          && pz > TRINITY_BETRAYAL_MORPHEUS_Z_FAR && pz < TRINITY_BETRAYAL_MORPHEUS_Z_NEAR
+          && px >= 5.15 && px <= 8.85) {
         game.secretMorpheusPhase = 1;
         game.playerFrozen = true;
         game.secretMorphLineTimer = 0;
         if (game.morpheusRoot) {
-          game.morpheusRoot.visible = true;
-          game.morpheusRoot.position.set(7, 0, TRINITY_Z1 - 0.2);
+          game.morpheusRoot.position.set(7, 0, MORPHEUS_BETRAYAL_SPAWN_Z);
+          if (game.reinstateMorpheusForBetrayalAmbush) game.reinstateMorpheusForBetrayalAmbush();
         }
         if (document.pointerLockElement) document.exitPointerLock();
         if (pauseRef.current) pauseRef.current.style.display = "none";
@@ -3166,18 +3303,26 @@ export default function MatrixGame() {
           var mvdz = ptz2 - mrr.position.z;
           var mvd = Math.hypot(mvdx, mvdz);
           mrr.rotation.y = Math.atan2(mvdx, mvdz);
-          if (mvd < 1.85) {
+          var morStop = MORPHEUS_BETRAYAL_STOP_DIST;
+          if (mvd <= morStop + 0.04) {
             game.secretMorpheusPhase = 2;
             game.secretMorphLineTimer = 0;
             if (game.morpheusBubble) {
-              updateBubbleText(game.morpheusBubble, "You monster…\nYou were \"The One\"?\nI'm the one holding the machine gun.");
+              if (game.morpheusBubble.sprite.material) {
+                game.morpheusBubble.sprite.material.opacity = 1;
+                game.morpheusBubble.sprite.material.needsUpdate = true;
+              }
+              updateBubbleText(game.morpheusBubble, "You killed Trinity.\nYou monster…\nYou were \"The One\"?\nI'm the one holding the machine gun.");
               game.morpheusBubble.sprite.visible = true;
             }
+            if (game.reinstateMorpheusForBetrayalAmbush) game.reinstateMorpheusForBetrayalAmbush();
           } else {
             var mspd2 = 5.2 * dt;
-            var mstep = Math.min(mspd2, Math.max(0, mvd - 1.85));
+            var mstep = Math.min(mspd2, Math.max(0, mvd - morStop));
             mrr.position.x += (mvdx / mvd) * mstep;
             mrr.position.z += (mvdz / mvd) * mstep;
+            mrr.position.x = Math.max(TRINITY_X0 + 0.42, Math.min(TRINITY_X1 - 0.42, mrr.position.x));
+            mrr.position.z = Math.max(TRINITY_Z0 + 0.45, Math.min(mrr.position.z, MORPHEUS_BETRAYAL_WALK_MAX_Z));
           }
         } else if (game.secretMorpheusPhase === 2) {
           game.secretMorphLineTimer += dt;
@@ -3732,14 +3877,29 @@ export default function MatrixGame() {
 
       if (game.finalDoorOpen && game.finalExitGlow) {
         game.finalExitGlow.material.opacity = 0.52 + 0.26 * Math.sin(animT * 2.6);
-        if (game.finalExitSign) game.finalExitSign.visible = true;
+        var morpheusAmbush = game.secretMorpheusPhase > 0;
+        game.finalExitGlow.material.depthTest = morpheusAmbush;
+        if (game.finalExitSign) {
+          game.finalExitSign.visible = true;
+          game.finalExitSign.material.depthTest = morpheusAmbush;
+          game.finalExitSign.renderOrder = morpheusAmbush ? 6 : 8;
+        }
         if (game.finalExitCore) {
           game.finalExitCore.visible = true;
           game.finalExitCore.material.opacity = 0.32 + 0.14 * Math.sin(animT * 3.1 + 0.7);
+          game.finalExitCore.material.depthTest = morpheusAmbush;
         }
         if (game.finalExitLight) game.finalExitLight.intensity = 0.95 + 0.35 * Math.sin(animT * 2.2);
         if (game.finalExitFrameMeshes) {
-          for (var fem2 = 0; fem2 < game.finalExitFrameMeshes.length; fem2++) game.finalExitFrameMeshes[fem2].visible = true;
+          for (var fem2 = 0; fem2 < game.finalExitFrameMeshes.length; fem2++) {
+            var fmesh = game.finalExitFrameMeshes[fem2];
+            fmesh.visible = true;
+            if (fmesh.material) {
+              fmesh.material.depthTest = morpheusAmbush;
+              fmesh.material.needsUpdate = true;
+            }
+            fmesh.renderOrder = morpheusAmbush ? 3 : 4;
+          }
         }
       }
 
@@ -3805,6 +3965,7 @@ export default function MatrixGame() {
 
     return function cleanup() {
       cancelAnimationFrame(animId);
+      game.reinstateMorpheusForBetrayalAmbush = null;
       document.removeEventListener("keydown", onKD);
       document.removeEventListener("keyup", onKU);
       document.removeEventListener("mousedown", onMD);
@@ -3862,6 +4023,7 @@ export default function MatrixGame() {
     game.trinityPhase = -1;
     game.trinityPhaseTimer = 0;
     game.trinityRunWi = 0;
+    game.trinityBodyRoot = null;
     game.introPhase = 0;
     game.introTimer = 0;
     game.introDone = false;
@@ -3875,7 +4037,11 @@ export default function MatrixGame() {
     game.smithHitReactTimer = 0;
     game.trinityRoomSealed = false;
     game.agentSmith = null;
+    game.reinstateMorpheusForBetrayalAmbush = null;
     game.trinityDesecrated = false;
+    game.trinityBetrayalAnim = null;
+    game.trinityBetrayalMats = null;
+    game.trinityBetrayalBase = null;
     game.secretMorpheusPhase = 0;
     game.secretMorphLineTimer = 0;
     game.playerFrozen = false;
