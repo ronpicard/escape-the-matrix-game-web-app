@@ -24,7 +24,7 @@ function MatrixRain({ color }) {
     var frameSkip = 0;
     function layout() {
       if (!parent) return;
-      var dpr = Math.min(window.devicePixelRatio || 1, lowFi ? 1 : 2);
+      var dpr = Math.min(window.devicePixelRatio || 1, lowFi ? 1 : 3);
       var bw = Math.max(32, Math.floor(parent.clientWidth * dpr * (lowFi ? 0.55 : 1)));
       var bh = Math.max(32, Math.floor(parent.clientHeight * dpr * (lowFi ? 0.55 : 1)));
       w = bw;
@@ -611,7 +611,14 @@ export default function MatrixGame() {
   var showOpts = optsState[0];
   var setShowOpts = optsState[1];
 
-  var settingsRef = useRef({ sensitivity: 1.0, brightness: 1.0, enemySpeed: 1.0 });
+  var isMob =
+    (typeof window !== "undefined") &&
+    (("ontouchstart" in window) || navigator.maxTouchPoints > 0);
+  var settingsRef = useRef({
+    sensitivity: isMob ? 1.0 : 0.6,
+    brightness: 1.0,
+    enemySpeed: 1.0,
+  });
 
   var gsState = useState(initialState);
   var gs = gsState[0];
@@ -944,7 +951,7 @@ export default function MatrixGame() {
     if (renderer.outputColorSpace !== undefined) renderer.outputColorSpace = THREE.LinearSRGBColorSpace;
     function effectivePixelRatio() {
       var dpr = window.devicePixelRatio || 1;
-      return game.isMobile ? Math.min(dpr, 1.25) : Math.min(dpr, 2);
+      return game.isMobile ? Math.min(dpr, 2) : Math.min(dpr, 3);
     }
     renderer.setPixelRatio(effectivePixelRatio());
     renderer.setSize(W, H);
@@ -957,7 +964,7 @@ export default function MatrixGame() {
 
     // Textures (2 shared)
     var textures = [];
-    var texSize = game.isMobile ? 48 : 112;
+    var texSize = game.isMobile ? 64 : 192;
     for (var ti = 0; ti < 2; ti++) {
       var mc = makeMatrixCanvas(texSize, texSize);
       for (var j = 0; j < 50; j++) tickMatrixCanvas(mc, 0.5 + ti * 0.2);
@@ -4050,7 +4057,6 @@ export default function MatrixGame() {
     setEntered(false);
   }
 
-  var isMob = (typeof window !== "undefined") && (("ontouchstart" in window) || navigator.maxTouchPoints > 0);
   var font = "'Courier New', monospace";
 
   var objectives = [
@@ -4306,7 +4312,7 @@ export default function MatrixGame() {
                 {isMob ? "Touch" : "Mouse"} Sensitivity
               </div>
               <input type="range" min="0.2" max="3" step="0.1"
-                defaultValue="1"
+                defaultValue={isMob ? 1 : 0.6}
                 onChange={function (e) { settingsRef.current.sensitivity = parseFloat(e.target.value); }}
                 onPointerDown={function (e) { e.stopPropagation(); }}
                 onTouchStart={function (e) { e.stopPropagation(); }}
